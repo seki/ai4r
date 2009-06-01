@@ -118,7 +118,7 @@ module Ai4r
         @structure = network_structure
         @initial_weight_function = lambda { |n, i, j| ((rand 2000)/1000.0) - 1}
         @propagation_function = lambda { |x| 1/(1+Math.exp(-1*(x))) } #lambda { |x| Math.tanh(x) }
-        @derivative_propagation_function = lambda { |y| y*(1-y) } #lambda { |y| 1.0 - y**2 }
+        @derivative_propagation_function = lambda { |y,e| y*(1-y)*e } #lambda { |y| 1.0 - y**2 }
         @disable_bias = false
         @learning_rate = 0.25
         @momentum = 0.1
@@ -159,8 +159,15 @@ module Ai4r
         return self
       end
       
-      protected
+      def make_zero
+        0.0
+      end
 
+      def make_one
+        1.0
+      end
+
+      protected
       # Propagate error backwards
       def backpropagate(expected_output_values)
         check_output_dimension(expected_output_values.length)
@@ -176,7 +183,7 @@ module Ai4r
         end
         @weights.each_index do |n|
           @structure[n+1].times do |j|
-            sum = 0.0
+            sum = make_zero
             @activation_nodes[n].each_index do |i|
               sum += (@activation_nodes[n][i] * @weights[n][i][j])
             end
@@ -188,10 +195,10 @@ module Ai4r
       # Initialize neurons structure.
       def init_activation_nodes
         @activation_nodes = Array.new(@structure.length) do |n| 
-          Array.new(@structure[n], 1.0)
+          Array.new(@structure[n], make_one)
         end
         if not disable_bias
-          @activation_nodes[0...-1].each {|layer| layer << 1.0 }
+          @activation_nodes[0...-1].each {|layer| layer << make_one }
         end
       end
       
@@ -215,7 +222,7 @@ module Ai4r
       def init_last_changes
         @last_changes = Array.new(@weights.length) do |w|
           Array.new(@weights[w].length) do |i| 
-            Array.new(@weights[w][i].length, 0.0)
+            Array.new(@weights[w][i].length, make_zero)
           end
         end
       end
@@ -227,7 +234,7 @@ module Ai4r
         output_values.each_index do |output_index|
           error = expected_values[output_index] - output_values[output_index]
           output_deltas << @derivative_propagation_function.call(
-            output_values[output_index]) * error
+            output_values[output_index], error)
         end
         @deltas = [output_deltas]
       end
@@ -238,12 +245,12 @@ module Ai4r
         (@activation_nodes.length-2).downto(1) do |layer_index|
           layer_deltas = []
           @activation_nodes[layer_index].each_index do |j|
-            error = 0.0
+            error = make_zero
             @structure[layer_index+1].times do |k|
               error += prev_deltas[k] * @weights[layer_index][j][k]
             end
             layer_deltas[j] = (@derivative_propagation_function.call(
-              @activation_nodes[layer_index][j]) * error)
+              @activation_nodes[layer_index][j], error))
           end
           prev_deltas = layer_deltas
           @deltas.unshift(layer_deltas)
@@ -251,11 +258,15 @@ module Ai4r
       end
       
       # Update weights after @deltas have been calculated.
+      def calculate_change(n, i, j)
+        @deltas[n][j]*@activation_nodes[n][i]
+      end
+
       def update_weights
         (@weights.length-1).downto(0) do |n|
           @weights[n].each_index do |i|  
             @weights[n][i].each_index do |j|  
-              change = @deltas[n][j]*@activation_nodes[n][i]
+              change = calculate_change(n, i, j)
               @weights[n][i][j] += ( learning_rate * change + 
                   momentum * @last_changes[n][i][j])
               @last_changes[n][i][j] = change
@@ -268,7 +279,7 @@ module Ai4r
       # Error = 0.5 * sum( (expected_value[i] - output_value[i])**2 )
       def calculate_error(expected_output)
         output_values = @activation_nodes.last
-        error = 0.0
+        error = make_zero
         expected_output.each_index do |output_index|
           error += 
             0.5*(output_values[output_index]-expected_output[output_index])**2
